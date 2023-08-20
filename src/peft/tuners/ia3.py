@@ -87,6 +87,7 @@ class IA3Config(PeftConfig):
         default=True,
         metadata={"help": "Whether to initialize the vectors in the (IA)^3 layers."},
     )
+    r: int = field(default=1, metadata={"help": "(IA)^3 attention dimension. Defaults to 1."})
 
     def __post_init__(self):
         self.peft_type = PeftType.IA3
@@ -108,12 +109,12 @@ class IA3Layer(BaseTunerLayer):
         self.out_features = out_features
         self.is_feedforward = is_feedforward
 
-    def update_layer(self, adapter_name, init_ia3_weights):
+    def update_layer(self, adapter_name, r, init_ia3_weights):
         # Actual trainable parameters
         if self.is_feedforward:
-            weight = torch.randn((1, self.in_features))
+            weight = torch.randn((r, self.in_features))
         else:
-            weight = torch.randn((self.out_features, 1))
+            weight = torch.randn((self.out_features, r))
         self.ia3_l.update(nn.ParameterDict({adapter_name: nn.Parameter(weight)}))
         if init_ia3_weights:
             self.reset_ia3_parameters(adapter_name)
@@ -149,6 +150,7 @@ class IA3Model(BaseTuner):
         ...     task_type="SEQ_2_SEQ_LM",
         ...     target_modules=["k", "v", "w0"],
         ...     feedforward_modules=["w0"],
+        ...     r=1,
         ... )
 
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
@@ -259,6 +261,7 @@ class IA3Model(BaseTuner):
         if isinstance(target, IA3Layer):
             target.update_layer(
                 adapter_name,
+                ia3_config.r,
                 ia3_config.init_ia3_weights,
             )
         else:
@@ -377,6 +380,7 @@ class Linear(nn.Linear, IA3Layer):
         adapter_name: str,
         in_features: int,
         out_features: int,
+        r: int = 1,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_feedforward: bool = False,  # Set to True if the layer is treated as a feedforward layer
         **kwargs,
@@ -393,7 +397,7 @@ class Linear(nn.Linear, IA3Layer):
             self.weight.data = self.weight.data.T
 
         nn.Linear.reset_parameters(self)
-        self.update_layer(adapter_name, init_ia3_weights)
+        self.update_layer(adapter_name, r, init_ia3_weights)
         self.active_adapter = adapter_name
 
         self.is_feedforward = is_feedforward
@@ -466,6 +470,7 @@ if is_bnb_available():
             in_features,
             out_features,
             is_feedforward,
+            r: int = 1,
             **kwargs,
         ):
             bnb.nn.Linear8bitLt.__init__(
@@ -484,7 +489,7 @@ if is_bnb_available():
             self.weight.requires_grad = False
 
             init_ia3_weights = kwargs.pop("init_ia3_weights", True)
-            self.update_layer(adapter_name, init_ia3_weights)
+            self.update_layer(adapter_name, r, init_ia3_weights)
             self.active_adapter = adapter_name
             self.is_feedforward = is_feedforward
 

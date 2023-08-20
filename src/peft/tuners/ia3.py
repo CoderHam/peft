@@ -111,14 +111,15 @@ class IA3Layer(BaseTunerLayer):
 
     def update_layer(self, adapter_name, r, init_ia3_weights):
         # Actual trainable parameters
-        if self.is_feedforward:
-            weight = torch.randn((r, self.in_features))
-        else:
-            weight = torch.randn((self.out_features, r))
-        self.ia3_l.update(nn.ParameterDict({adapter_name: nn.Parameter(weight)}))
-        if init_ia3_weights:
-            self.reset_ia3_parameters(adapter_name)
-        self.to(self.weight.device)
+        for rid in range(r):
+            if self.is_feedforward:
+                weight = torch.randn((1, self.in_features))
+            else:
+                weight = torch.randn((self.out_features, 1))
+            self.ia3_l.update(nn.ParameterDict({f"{adapter_name}_{rid}": nn.Parameter(weight)}))
+            if init_ia3_weights:
+                self.reset_ia3_parameters(f"{adapter_name}_{rid}")
+            self.to(self.weight.device)
 
     def reset_ia3_parameters(self, adapter_name):
         if adapter_name in self.ia3_l.keys():
@@ -254,6 +255,7 @@ class IA3Model(BaseTuner):
         kwargs = {
             "fan_in_fan_out": ia3_config.fan_in_fan_out,
             "init_ia3_weights": ia3_config.init_ia3_weights,
+            "r": ia3_config.r,
             "loaded_in_8bit": loaded_in_8bit,
             "is_feedforward": is_feedforward,
         }
@@ -399,6 +401,7 @@ class Linear(nn.Linear, IA3Layer):
         nn.Linear.reset_parameters(self)
         self.update_layer(adapter_name, r, init_ia3_weights)
         self.active_adapter = adapter_name
+        self.r = r
 
         self.is_feedforward = is_feedforward
 
@@ -433,7 +436,7 @@ class Linear(nn.Linear, IA3Layer):
     def forward(self, x: torch.Tensor):
         previous_dtype = x.dtype
 
-        if self.active_adapter not in self.ia3_l.keys():
+        if f"{self.active_adapter}_{0}" not in self.ia3_l.keys():
             return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
 
         if self.disable_adapters:
@@ -441,9 +444,11 @@ class Linear(nn.Linear, IA3Layer):
                 self.unmerge()
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         elif not self.merged:
+            # TODO Fix merged forward logic. Eval numbers are good but inference has a bug. Need to revist
             if self.is_feedforward:
-                x = x.to(self.ia3_l[self.active_adapter].dtype)
-                interm = x * self.ia3_l[self.active_adapter].flatten()
+                interm = x.to(self.ia3_l[f"{self.active_adapter}_0"].dtype) * self.ia3_l[f"{self.active_adapter}_0"].flatten()
+                for rid in range(1, self.r):
+                    interm = x.to(self.ia3_l[f"{self.active_adapter}_{rid}"].dtype) * self.ia3_l[f"{self.active_adapter}_{rid}"].flatten()
                 result = F.linear(
                     interm.to(self.weight.dtype),
                     transpose(self.weight, self.fan_in_fan_out),
@@ -451,7 +456,8 @@ class Linear(nn.Linear, IA3Layer):
                 )
             else:
                 result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
-                result = result.to(self.ia3_l[self.active_adapter].dtype) * self.ia3_l[self.active_adapter].flatten()
+                for rid in range(self.r):
+                    result = result.to(self.ia3_l[f"{self.active_adapter}_{rid}"].dtype) * self.ia3_l[f"{self.active_adapter}_{rid}"].flatten()
         else:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
 

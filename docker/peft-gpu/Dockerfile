@@ -47,7 +47,7 @@ ENV PATH /opt/conda/bin:$PATH
 RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
 RUN source activate peft && \ 
-    python3 -m pip install --no-cache-dir bitsandbytes optimum auto-gptq
+    python3 -m pip install --no-cache-dir bitsandbytes optimum auto-gptq jupyterlab transformers datasets
 
 # Install apt libs
 RUN apt-get update && \

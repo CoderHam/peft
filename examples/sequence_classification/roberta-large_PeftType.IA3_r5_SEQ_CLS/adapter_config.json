@@ -1,0 +1,20 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": "roberta-large",
+  "fan_in_fan_out": false,
+  "feedforward_modules": [
+    "output.dense"
+  ],
+  "inference_mode": true,
+  "init_ia3_weights": true,
+  "modules_to_save": null,
+  "peft_type": "IA3",
+  "r": 5,
+  "revision": null,
+  "target_modules": [
+    "key",
+    "value",
+    "output.dense"
+  ],
+  "task_type": "SEQ_CLS"
+}
